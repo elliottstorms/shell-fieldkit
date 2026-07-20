@@ -51,18 +51,24 @@ echo "== watchdog =="
 run_with_timeout 5 true;  check "passes through a success exit" "$?" "0"
 run_with_timeout 5 false; check "passes through a failure exit" "$?" "1"
 
-before="$(pgrep -fc "sleep 9" 2>/dev/null || echo 0)"
+# Count matching processes portably. `pgrep -c` is not usable here: on Linux it
+# prints "0" AND exits nonzero when nothing matches, so the usual `|| echo 0`
+# fallback appends a second zero and the comparison sees "0\n0". BSD pgrep does
+# not, so this passes locally on macOS and fails only in CI. Counting lines
+# ourselves behaves the same everywhere.
+procs() { pgrep -f "$1" 2>/dev/null | wc -l | tr -d ' '; }
+
+before="$(procs 'sleep 9')"
 run_with_timeout 1 sleep 9
 check "reports 124 when the timeout fires" "$?" "124"
 sleep 1
-after="$(pgrep -fc "sleep 9" 2>/dev/null || echo 0)"
-check "kills the timed-out command" "$after" "$before"
+check "kills the timed-out command" "$(procs 'sleep 9')" "$before"
 
 # The orphan bug: after a FAST command, the watchdog's own sleep must be gone
 # too, not left running for the full timeout holding stdout open.
 run_with_timeout 30 true
 sleep 1
-check "leaves no orphan watchdog sleep" "$(pgrep -fc 'sleep 30' 2>/dev/null || echo 0)" "0"
+check "leaves no orphan watchdog sleep" "$(procs 'sleep 30')" "0"
 
 echo "== tripwire =="
 mkdir -p "$TMP/tree/nested"
