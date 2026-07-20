@@ -1,0 +1,17 @@
+name: test
+on: [push, pull_request]
+jobs:
+  suite:
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu ships gawk, macos ships a BSD awk. The date arithmetic in
+        # report.sh has to work on both, and it did not on the first attempt.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: awk in use
+        run: awk --version 2>/dev/null | head -1 || echo "BSD awk (no --version)"
+      - name: suite
+        run: bash test/run.sh
