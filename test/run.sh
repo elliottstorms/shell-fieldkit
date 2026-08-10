@@ -58,17 +58,31 @@ run_with_timeout 5 false; check "passes through a failure exit" "$?" "1"
 # ourselves behaves the same everywhere.
 procs() { pgrep -f "$1" 2>/dev/null | wc -l | tr -d ' '; }
 
+# Poll up to ~3s for a process pattern to drain to an expected count, instead of
+# assuming a fixed sleep is long enough. Reaping a killed process is a beat
+# slower on a loaded CI runner than on a quiet laptop, and a bare `sleep 1;
+# check` turns that beat into a flaky failure: the assertion is still exact (a
+# process that genuinely survives never reaches the count and still fails), it
+# just stops racing the scheduler. Echoes the final observed count.
+wait_procs() {
+  _wp_pat="$1"; _wp_want="$2"; _wp_n="$(procs "$_wp_pat")"
+  for _wp_i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    [ "$_wp_n" = "$_wp_want" ] && break
+    sleep 0.25
+    _wp_n="$(procs "$_wp_pat")"
+  done
+  echo "$_wp_n"
+}
+
 before="$(procs 'sleep 9')"
 run_with_timeout 1 sleep 9
 check "reports 124 when the timeout fires" "$?" "124"
-sleep 1
-check "kills the timed-out command" "$(procs 'sleep 9')" "$before"
+check "kills the timed-out command" "$(wait_procs 'sleep 9' "$before")" "$before"
 
 # The orphan bug: after a FAST command, the watchdog's own sleep must be gone
 # too, not left running for the full timeout holding stdout open.
 run_with_timeout 30 true
-sleep 1
-check "leaves no orphan watchdog sleep" "$(procs 'sleep 30')" "0"
+check "leaves no orphan watchdog sleep" "$(wait_procs 'sleep 30' 0)" "0"
 
 # The escalation: a command that ignores TERM must still be stopped, by a KILL
 # after the grace period. A fifo with no writer blocks the process in-place, in
@@ -79,8 +93,7 @@ FIFO="$TMP/wd.fifo"
 mkfifo "$FIFO"
 WATCHDOG_KILL_AFTER=1 run_with_timeout 1 bash -c 'trap "" TERM; read _ < '"$FIFO"
 check "reports 124 for a command that ignores SIGTERM" "$?" "124"
-sleep 1
-check "escalates to SIGKILL when TERM is ignored" "$(procs "read _ < $FIFO")" "0"
+check "escalates to SIGKILL when TERM is ignored" "$(wait_procs "read _ < $FIFO" 0)" "0"
 
 echo "== tripwire =="
 mkdir -p "$TMP/tree/nested"
