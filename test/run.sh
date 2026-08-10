@@ -70,6 +70,18 @@ run_with_timeout 30 true
 sleep 1
 check "leaves no orphan watchdog sleep" "$(procs 'sleep 30')" "0"
 
+# The escalation: a command that ignores TERM must still be stopped, by a KILL
+# after the grace period. A fifo with no writer blocks the process in-place, in
+# ONE process, so there is no child to muddy the check; `trap "" TERM` makes it
+# decline the polite signal. Without escalation this returns the job's own exit
+# and leaves it running; with it, 124 and gone.
+FIFO="$TMP/wd.fifo"
+mkfifo "$FIFO"
+WATCHDOG_KILL_AFTER=1 run_with_timeout 1 bash -c 'trap "" TERM; read _ < '"$FIFO"
+check "reports 124 for a command that ignores SIGTERM" "$?" "124"
+sleep 1
+check "escalates to SIGKILL when TERM is ignored" "$(procs "read _ < $FIFO")" "0"
+
 echo "== tripwire =="
 mkdir -p "$TMP/tree/nested"
 echo "just some ordinary config" > "$TMP/tree/clean.txt"

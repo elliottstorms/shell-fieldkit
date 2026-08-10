@@ -17,7 +17,7 @@ exists because of one of those:
 | File | The bug it is the fix for |
 |---|---|
 | `lib/lockfile.sh` | A crashed run left its lock behind, so every later run exited "cleanly" believing a sibling was live. Weeks of successful-looking no-ops. |
-| `lib/watchdog.sh` | The timeout `sleep` outlived the job it was guarding and held the caller's stdout open, so a finished job looked like a hung one. |
+| `lib/watchdog.sh` | The timeout `sleep` outlived the job it was guarding and held the caller's stdout open, so a finished job looked like a hung one. And a job that caught TERM shrugged off the timeout entirely, so the guard guarded nothing. |
 | `lib/preflight.sh` | A scheduled job spent its whole run discovering it had been logged out, then reported a failure that did not say how to fix it. |
 | `lib/tripwire.sh` | A publish pipeline sanitized its output and trusted the sanitizer. The check has to run on the finished artifact, and it has to be able to refuse. |
 | `lib/report.sh` | A broken job went unnoticed for four days, then, once fixed, kept being reported as broken because nothing marked it resolved. |
@@ -70,6 +70,15 @@ lock file is real and current and points at a running process.
 `sleep` to init, after which `pkill -P` finds no children and the orphan survives
 for the full timeout.
 
+**TERM is a request; only KILL is a guarantee.** A timeout that sends `SIGTERM`
+and trusts it will be obeyed by exactly the jobs that do not need timing out. A
+job with a cleanup `trap` on TERM, or one that catches it for a graceful
+shutdown and then wedges, keeps running, and the bound you thought you had is
+gone. So the watchdog escalates: TERM, a grace period (`WATCHDOG_KILL_AFTER`,
+default 5s, widen it if a job legitimately needs longer to flush), then `KILL`,
+which cannot be caught. The grace period is the whole design: enough that a
+well-behaved job cleans up, not so much that a wedged one runs on.
+
 **Exit codes are the interface.** `0` clean, `2` findings, `124` timed out, `1`
 the tool itself failed. Keeping "found a problem" distinct from "I broke" is what
 lets a caller trust the answer.
@@ -90,12 +99,13 @@ Julian day numbers for that reason, and CI runs the suite on both awks.
 bash test/run.sh
 ```
 
-26 assertions, no framework, one exit code. They cover the bug-shaped claims
+28 assertions, no framework, one exit code. They cover the bug-shaped claims
 specifically: that a lock held by a live process is refused and one held by a
-dead process is reaped, that no orphan `sleep` survives a fast command, that the
-tripwire fires on a planted credential, and that a resolved failure stops being
-reported. If you delete a test, delete the claim it defends from this README in
-the same commit.
+dead process is reaped, that no orphan `sleep` survives a fast command, that a
+job which ignores TERM is still killed after the grace period, that the tripwire
+fires on a planted credential, and that a resolved failure stops being reported.
+If you delete a test, delete the claim it defends from this README in the same
+commit.
 
 ## License
 
