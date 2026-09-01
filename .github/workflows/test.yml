@@ -10,7 +10,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: awk in use
         run: awk --version 2>/dev/null | head -1 || echo "BSD awk (no --version)"
       - name: suite
