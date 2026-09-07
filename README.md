@@ -61,6 +61,16 @@ tripwire_scan ./out || exit 2
 test. Clearing a lock on a timer alone means a slow but healthy run gets its lock
 taken by the next fire, which is a worse bug than the one you were fixing.
 
+**A PID is not an identity.** `kill -0 <pid>` answers "is some process with this
+number alive", not "is the process that took the lock still alive". After a
+holder crashes, the kernel eventually hands its number to something unrelated,
+and a liveness check that trusts the PID alone then reads the lock as live
+forever: the crash-leftover bug wearing a disguise, immortal instead of merely
+stale. The lock records the holder's start time next to its PID and treats a live
+PID whose start time no longer matches as gone. It reaps only on a proven
+mismatch and never when the start time cannot be read, because stealing a lock
+from a healthy long runner is the worse of the two failures.
+
 **A wrapper and the worker it launches must not share a lock path.** If they do,
 the worker finds the wrapper's own lock, decides a sibling is live, and exits
 successfully having done nothing. This one is genuinely hard to see, because the
@@ -99,11 +109,13 @@ Julian day numbers for that reason, and CI runs the suite on both awks.
 bash test/run.sh
 ```
 
-28 assertions, no framework, one exit code. They cover the bug-shaped claims
+30 assertions, no framework, one exit code. They cover the bug-shaped claims
 specifically: that a lock held by a live process is refused and one held by a
-dead process is reaped, that no orphan `sleep` survives a fast command, that a
-job which ignores TERM is still killed after the grace period, that the tripwire
-fires on a planted credential, and that a resolved failure stops being reported.
+dead process is reaped, that a lock whose PID was recycled by an unrelated
+process is reaped rather than believed, that no orphan `sleep` survives a fast
+command, that a job which ignores TERM is still killed after the grace period,
+that the tripwire fires on a planted credential, and that a resolved failure
+stops being reported.
 If you delete a test, delete the claim it defends from this README in the same
 commit.
 

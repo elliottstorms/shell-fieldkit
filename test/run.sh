@@ -47,6 +47,21 @@ check "release leaves another process's lock alone" "$([ -f "$L" ] && echo prese
 echo $$ > "$L"; lock_release "$L"
 check "release removes our own lock" "$([ -f "$L" ] || echo gone)" "gone"
 
+# A live holder that is genuinely the same process must be refused. lock_acquire
+# now records our start time next to our pid, so re-acquiring our own fresh lock
+# hits the same-process path and is turned away.
+rm -f "$L"
+lock_acquire "$L"                   # writes "$$ <our start time>"
+lock_acquire "$L"; check "refuses a lock held by the same live process" "$?" "1"
+
+# The recycled-PID trap: a crashed holder's pid handed to an unrelated live
+# process. Simulate it with OUR live pid but a start time that cannot be ours, so
+# `kill -0` still succeeds yet the recorded identity no longer matches. Old code
+# read this as live-and-held forever; it must now be reaped as provably gone.
+printf '%s %s\n' "$$" "Thu Jan 1 00:00:00 2000" > "$L"
+touch -t 200001010000 "$L"          # old enough to clear the age second-opinion
+lock_acquire "$L"; check "reaps a lock whose pid was recycled" "$?" "0"
+
 echo "== watchdog =="
 run_with_timeout 5 true;  check "passes through a success exit" "$?" "0"
 run_with_timeout 5 false; check "passes through a failure exit" "$?" "1"
