@@ -110,6 +110,16 @@ WATCHDOG_KILL_AFTER=1 run_with_timeout 1 bash -c 'trap "" TERM; read _ < '"$FIFO
 check "reports 124 for a command that ignores SIGTERM" "$?" "124"
 check "escalates to SIGKILL when TERM is ignored" "$(wait_procs "read _ < $FIFO" 0)" "0"
 
+# The descendant bug: a job shaped like `worker & wait` must not leave the worker
+# running when the timeout fires. Signalling only the direct child kills the thin
+# `wait` shell and reparents the worker to init, still burning the clock the
+# timeout was meant to bound. The tree snapshot has to reach it. `sleep 97` is a
+# pattern unique to this test so the count cannot collide with another block's.
+before97="$(procs 'sleep 97')"
+WATCHDOG_KILL_AFTER=1 run_with_timeout 1 bash -c 'sleep 97 & wait'
+check "reports 124 when a worker outlives the timeout" "$?" "124"
+check "reaps a grandchild worker, not just the direct child" "$(wait_procs 'sleep 97' "$before97")" "$before97"
+
 echo "== tripwire =="
 mkdir -p "$TMP/tree/nested"
 echo "just some ordinary config" > "$TMP/tree/clean.txt"
