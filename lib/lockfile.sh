@@ -76,19 +76,28 @@ lock_acquire() {
     # immortal. A long-running job is still a running job, and stealing its lock
     # is how two publishers end up writing at once, so the start-time check is
     # deliberately conservative: it only reaps on a proven MISMATCH.
-    if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null \
-        && _lock_same_process "$holder" "$holder_start"; then
-      return 1
-    fi
-
-    # No live holder (dead, or the PID was recycled by an unrelated process). If
-    # the file is also older than max_age, it is a crash leftover and safe to
-    # clear. The age check stays as a second opinion for the window where a PID
-    # was written but the process has not started, and for lock files holding
-    # something other than a PID.
-    if [ -z "$(find "$lock_path" -mmin -"$max_age" 2>/dev/null)" ]; then
+    if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
+      if _lock_same_process "$holder" "$holder_start"; then
+        return 1                                # genuinely the same live process
+      fi
+      # Alive, but the recorded start time proves this is a DIFFERENT process:
+      # the holder crashed and its PID was reused. That is positive proof the
+      # holder is gone, so reap now. Falling through to the age check here was
+      # the gap the start-time record was added to close but did not: a FRESH
+      # recycled-PID lock (a crash seconds ago, a busy machine handing the PID
+      # out fast, the exact case this defends) is younger than max_age, so the
+      # age branch would read it as held and freeze the lock for up to max_age.
+      # Proof of death outranks age; only the ambiguous cases below fall back to
+      # the clock.
+      rm -f "$lock_path"
+    elif [ -z "$(find "$lock_path" -mmin -"$max_age" 2>/dev/null)" ]; then
+      # No process holds this PID (dead and not reused), or the lock predates the
+      # start-time format. Nothing here can arbitrate identity, so age is the only
+      # signal left: an older-than-max_age file is a crash leftover, safe to clear.
       rm -f "$lock_path"
     else
+      # Fresh, and either a still-live same process (handled above) or a PID
+      # written just before its process was established. Too ambiguous to steal.
       return 1
     fi
   fi

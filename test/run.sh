@@ -56,11 +56,21 @@ lock_acquire "$L"; check "refuses a lock held by the same live process" "$?" "1"
 
 # The recycled-PID trap: a crashed holder's pid handed to an unrelated live
 # process. Simulate it with OUR live pid but a start time that cannot be ours, so
-# `kill -0` still succeeds yet the recorded identity no longer matches. Old code
-# read this as live-and-held forever; it must now be reaped as provably gone.
+# `kill -0` still succeeds yet the recorded identity no longer matches. The lock
+# is left FRESH on purpose: a real recycle happens moments after the crash, well
+# inside max_age, so aging the file here would prove only the age fallback and
+# leave the start-time reap (the whole point) untested. A mismatching identity is
+# positive proof the holder is gone and must be reaped on that proof alone.
+rm -f "$L"
 printf '%s %s\n' "$$" "Thu Jan 1 00:00:00 2000" > "$L"
-touch -t 200001010000 "$L"          # old enough to clear the age second-opinion
-lock_acquire "$L"; check "reaps a lock whose pid was recycled" "$?" "0"
+lock_acquire "$L"; check "reaps a FRESH lock whose pid was recycled" "$?" "0"
+check "reap records our pid" "$(lock_holder "$L")" "$$"
+
+# And the age fallback still stands on its own for the case identity cannot speak
+# to: a dead-and-not-reused PID (no live process, no start time to compare).
+echo 99999 > "$L"
+touch -t 200001010000 "$L"
+lock_acquire "$L"; check "reaps an old lock via the age fallback" "$?" "0"
 
 echo "== watchdog =="
 run_with_timeout 5 true;  check "passes through a success exit" "$?" "0"
