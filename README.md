@@ -67,9 +67,13 @@ holder crashes, the kernel eventually hands its number to something unrelated,
 and a liveness check that trusts the PID alone then reads the lock as live
 forever: the crash-leftover bug wearing a disguise, immortal instead of merely
 stale. The lock records the holder's start time next to its PID and treats a live
-PID whose start time no longer matches as gone. It reaps only on a proven
-mismatch and never when the start time cannot be read, because stealing a lock
-from a healthy long runner is the worse of the two failures.
+PID whose start time no longer matches as gone. A proven mismatch is positive
+proof the holder died, so it is reaped at once rather than made to wait out the
+age tiebreaker: the recycle that matters happens seconds after the crash, while
+the lock is still fresh, so deferring to age would freeze exactly the lock this
+check exists to free. It reaps only on a proven mismatch and never when the start
+time cannot be read, because stealing a lock from a healthy long runner is the
+worse of the two failures.
 
 **A wrapper and the worker it launches must not share a lock path.** If they do,
 the worker finds the wrapper's own lock, decides a sibling is live, and exits
@@ -109,10 +113,11 @@ Julian day numbers for that reason, and CI runs the suite on both awks.
 bash test/run.sh
 ```
 
-30 assertions, no framework, one exit code. They cover the bug-shaped claims
+34 assertions, no framework, one exit code. They cover the bug-shaped claims
 specifically: that a lock held by a live process is refused and one held by a
-dead process is reaped, that a lock whose PID was recycled by an unrelated
-process is reaped rather than believed, that no orphan `sleep` survives a fast
+dead process is reaped, that a still-fresh lock whose PID was recycled by an
+unrelated process is reaped on the start-time proof alone rather than believed,
+that no orphan `sleep` survives a fast
 command, that a job which ignores TERM is still killed after the grace period,
 that the tripwire fires on a planted credential, and that a resolved failure
 stops being reported.
