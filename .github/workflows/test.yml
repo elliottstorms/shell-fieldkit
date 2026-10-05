@@ -7,11 +7,24 @@ jobs:
     # expansion or a non-portable construct that simply never breaks the one
     # path the tests happen to exercise. shellcheck reads every line statically,
     # so a portability or quoting regression fails here before it can merge green.
-    runs-on: ubuntu-latest  # the runner image ships shellcheck preinstalled
+    #
+    # The version is pinned rather than taken from the runner image. The image's
+    # ambient shellcheck drifts (it shipped 0.9.0 while this was written) and its
+    # advisory checks change between releases, so an unpinned gate is not
+    # reproducible: it can flip red on a runner-image bump with no code change,
+    # and "clean locally" stops meaning "clean in CI". Pinning makes the result a
+    # property of this repo, not of whatever the runner happens to carry.
+    runs-on: ubuntu-latest
+    env:
+      SHELLCHECK_VERSION: "0.11.0"
     steps:
       - uses: actions/checkout@v7
-      - name: shellcheck version
-        run: shellcheck --version
+      - name: install pinned shellcheck
+        run: |
+          url="https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          curl -fsSL "$url" | tar -xJ
+          sudo mv "shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version
       - name: lint
         run: shellcheck lib/*.sh test/*.sh
   suite:
