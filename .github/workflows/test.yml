@@ -1,6 +1,19 @@
 name: test
 on: [push, pull_request]
 jobs:
+  lint:
+    # The kit's whole promise is portable, correct shell. The functional suite
+    # proves behavior on gawk and BSD awk, but it cannot catch an unquoted
+    # expansion or a non-portable construct that simply never breaks the one
+    # path the tests happen to exercise. shellcheck reads every line statically,
+    # so a portability or quoting regression fails here before it can merge green.
+    runs-on: ubuntu-latest  # the runner image ships shellcheck preinstalled
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck version
+        run: shellcheck --version
+      - name: lint
+        run: shellcheck lib/*.sh test/*.sh
   suite:
     strategy:
       fail-fast: false
