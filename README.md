@@ -57,6 +57,16 @@ tripwire_scan ./out || exit 2
 
 ## Notes worth the paragraph
 
+**Taking the lock is one atomic step.** "One instance at a time" is only true if
+two instances starting at the same instant cannot both take it. A
+check-then-write (`[ -f lock ] || write lock`) cannot promise that: both racers
+read "absent" in the gap before either writes, so both write and both run. The
+acquire uses `set -C` (noclobber), where the create itself fails when the file
+already exists, so exactly one of a simultaneous burst wins. The same holds on
+the reap path: a stale lock is renamed aside before being recreated, and a
+rename of a path that exists once succeeds for only one racer, so two processes
+clearing the same crash leftover cannot both retake it.
+
 **A lock is stale only when its holder is dead.** Age is a tiebreaker, never the
 test. Clearing a lock on a timer alone means a slow but healthy run gets its lock
 taken by the next fire, which is a worse bug than the one you were fixing.
@@ -113,11 +123,12 @@ Julian day numbers for that reason, and CI runs the suite on both awks.
 bash test/run.sh
 ```
 
-34 assertions, no framework, one exit code. They cover the bug-shaped claims
+35 assertions, no framework, one exit code. They cover the bug-shaped claims
 specifically: that a lock held by a live process is refused and one held by a
 dead process is reaped, that a still-fresh lock whose PID was recycled by an
 unrelated process is reaped on the start-time proof alone rather than believed,
-that no orphan `sleep` survives a fast
+that a burst of concurrent cold starts yields exactly one holder, that no orphan
+`sleep` survives a fast
 command, that a job which ignores TERM is still killed after the grace period,
 that the tripwire fires on a planted credential, and that a resolved failure
 stops being reported.

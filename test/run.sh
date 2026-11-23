@@ -72,6 +72,24 @@ echo 99999 > "$L"
 touch -t 200001010000 "$L"
 lock_acquire "$L"; check "reaps an old lock via the age fallback" "$?" "0"
 
+# The cold-start race: many processes starting from NO lock in the same instant
+# must not all acquire. A non-atomic check-then-write lets every racer read
+# "absent" before any writes, so every one takes the lock; the whole point of a
+# single-instance lock is that exactly one does. Launch a burst of concurrent
+# acquires on a fresh path and assert precisely one wins. (Every sequential test
+# above passes under the broken version too, so this is the only one that sees
+# the bug.)
+RACE="$TMP/race.lock"
+rm -f "$RACE"
+mkdir -p "$TMP/won"
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  ( lock_acquire "$RACE" && : > "$TMP/won/$i" ) &
+done
+wait
+winners="$(find "$TMP/won" -type f 2>/dev/null | wc -l | tr -d ' ')"
+check "only one of 20 concurrent cold starts acquires" "$winners" "1"
+rm -rf "$TMP/won"; rm -f "$RACE"
+
 echo "== watchdog =="
 run_with_timeout 5 true;  check "passes through a success exit" "$?" "0"
 run_with_timeout 5 false; check "passes through a failure exit" "$?" "1"
